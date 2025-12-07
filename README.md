@@ -1,6 +1,6 @@
 # WBO Whiteboard Application - AWS Deployment
 
-A scalable, production-ready deployment of the [Whitebophir](https://github.com/lovasoa/whitebophir) collaborative whiteboard application on AWS, optimized for the **AWS Free Tier**.
+A scalable, production-ready deployment of the [Whitebophir](https://github.com/lovasoa/whitebophir) collaborative whiteboard application on AWS, **100% within the AWS Free Tier**.
 
 ## 🏗️ Architecture Overview
 
@@ -10,32 +10,29 @@ A scalable, production-ready deployment of the [Whitebophir](https://github.com/
                                     │  (Monitoring)   │
                                     └────────┬────────┘
                                              │
-┌──────────┐         ┌────────────┐         │        ┌─────────────┐
-│  Users   │────────▶│    ALB     │◀────────┼───────▶│  ECS Tasks  │
-│          │         │ (Load      │         │        │  (Fargate)  │
-└──────────┘         │ Balancer)  │         │        │ lovasoa/wbo │
-                     └────────────┘         │        └──────┬──────┘
-                                             │               │
-                     ┌────────────┐         │               │
-                     │  Route 53  │◀────────┘               │
-                     │   (DNS)    │                         │
-                     └────────────┘                         │
-                                                             │
-                     ┌────────────┐         ┌───────────────┼─────────┐
-                     │     S3     │◀────────│               │         │
-                     │(Persistence)│        │               ▼         ▼
-                     └────────────┘         │        ┌─────────────────┐
-                                            │        │ Redis ElastiCache│
-                                            │        │   (Pub/Sub)      │
-                                            │        └──────────────────┘
-                                            │
-                                            ▼
-                                     ┌────────────┐
-                                     │    VPC     │
-                                     │  Subnets   │
-                                     │ (Public +  │
-                                     │  Private)  │
-                                     └────────────┘
+┌──────────┐         ┌────────────┐         │        ┌─────────────────┐
+│  Users   │────────▶│    ALB     │◀────────┼───────▶│   ECS Tasks     │
+│          │         │ (Load      │         │        │   (Fargate)     │
+└──────────┘         │ Balancer)  │         │        │  lovasoa/wbo    │
+                     └────────────┘         │        └────────┬────────┘
+                                             │                 │
+                                             │                 │
+                                             │                 ▼
+                                             │        ┌──────────────────┐
+                                             │        │   EFS (Shared    │
+                                             └───────▶│   File Storage)  │
+                                                      │  • Real-time Sync│
+                                                      │  • Multi-Instance│
+                     ┌────────────┐                  └──────────────────┘
+                     │     S3     │
+                     │  (Backup)  │
+                     └────────────┘
+
+                     ┌────────────┐
+                     │    VPC     │
+                     │  Subnets   │
+                     │  (Public)  │
+                     └────────────┘
 ```
 
 ## 🎯 Key Features
@@ -49,18 +46,20 @@ A scalable, production-ready deployment of the [Whitebophir](https://github.com/
 - **Application Load Balancer**: Distributes traffic across multiple containers
 - **Multi-AZ Deployment**: High availability across availability zones
 
-### ✅ Redis Pub/Sub Synchronization
+### ✅ EFS Shared Storage Synchronization
 
-- **ElastiCache for Redis**: Centralized Redis cluster for real-time synchronization
-- **Multi-instance Support**: All WBO containers sync through Redis pub/sub
-- **Connection URL**: Automatically configured via `REDIS_URL` environment variable
-- **Optimized Parameters**: Custom parameter group for pub/sub performance
+- **Amazon EFS**: Network file system mounted by all containers
+- **Real-time Sync**: All containers read/write to same `/opt/app/server-data` directory
+- **Multi-instance Support**: Perfect synchronization across 1-10 containers
+- **How It Works**: WBO stores board data as files; EFS provides shared storage
+- **No Application Changes**: WBO designed for file-based storage, works natively
 
 ### ✅ Persistent Storage
 
-- **S3 Bucket**: Stores whiteboard data with versioning enabled
-- **IAM Policies**: Secure access for ECS tasks to S3
-- **Lifecycle Rules**: Automatic cleanup of old versions (30 days)
+- **EFS File System**: Primary storage for board data (encrypted, multi-AZ)
+- **S3 Bucket**: Backup and archival with versioning enabled
+- **IAM Policies**: Secure access for ECS tasks to storage
+- **Lifecycle Rules**: EFS transitions to IA after 30 days, S3 cleanup after 90 days
 
 ### ✅ Monitoring & Observability
 
@@ -68,24 +67,26 @@ A scalable, production-ready deployment of the [Whitebophir](https://github.com/
   - ECS CPU and Memory usage
   - ALB performance (response time, request count)
   - Target health status
-  - Redis performance metrics
+  - EFS performance metrics
+  - Running task count
   - Application logs
 - **CloudWatch Alarms**: Automated alerts for:
   - High CPU usage (>85%)
   - High memory usage (>90%)
   - Unhealthy targets
-  - High Redis CPU (>75%)
   - High response time (>1s)
 - **Container Insights**: Detailed ECS metrics
 - **Centralized Logging**: All application logs in CloudWatch
 
-### ✅ AWS Free Tier Optimized
+### ✅ 100% AWS Free Tier
 
-- **Cache.t3.micro Redis**: Single node (free tier eligible)
-- **ECS Fargate**: 256 CPU / 512 MB memory (minimal cost)
-- **S3**: Standard storage with lifecycle policies
-- **CloudWatch**: 7-day log retention
-- **ALB**: Optimized for low traffic
+- **ECS Fargate**: 256 CPU / 512 MB memory (20 GB-month free)
+- **EFS**: Network file system (5 GB storage free)
+- **S3**: Standard storage with lifecycle policies (5 GB free)
+- **ALB**: Application Load Balancer (750 hours/month free)
+- **CloudWatch**: 7-day log retention (5 GB logs, 10 alarms free)
+- **VPC/Networking**: All networking components (free)
+- **Total Monthly Cost**: $0.00 within free tier limits! 🎉
 
 ## 📋 Prerequisites
 
@@ -147,10 +148,9 @@ Access your whiteboard at: `http://<alb-dns-name>`
 The WBO container is configured with:
 
 ```bash
-PORT=80                    # Container port
-WBO_HISTORY_DIR=/opt/app/server-data  # Board data directory
-REDIS_URL=redis://<endpoint>:6379     # Redis pub/sub connection
-WBO_MAX_EMIT_COUNT=192     # Messages per 4 seconds
+PORT=80                            # Container port
+WBO_HISTORY_DIR=/opt/app/server-data  # Board data directory (mounted from EFS)
+WBO_MAX_EMIT_COUNT=192             # Messages per 4 seconds
 ```
 
 ### Scaling Configuration
@@ -163,15 +163,14 @@ ecs_max_capacity = 10  # Maximum tasks (traffic handling)
 ecs_desired_count = 2  # Initial task count
 ```
 
-### Redis Configuration
+### EFS Configuration
 
-For production with higher traffic:
+The EFS file system provides:
 
-```hcl
-redis_node_type = "cache.t3.small"  # Upgrade from cache.t3.micro
-num_cache_clusters = 2               # Add replication
-automatic_failover_enabled = true    # Enable failover
-```
+- **Encryption**: Data encrypted at rest
+- **Performance Mode**: Bursting (suitable for whiteboard workload)
+- **Lifecycle Policy**: Automatic transition to Infrequent Access after 30 days
+- **Mount Targets**: Available in both availability zones for high availability
 
 ## 📊 Monitoring
 
@@ -202,35 +201,48 @@ Configure SNS notifications by uncommenting in `monitoring.tf`:
 3. Update alarm_actions in alarm definitions
 4. Run `terraform apply`
 
-## 💰 Cost Optimization Tips
+## 💰 Cost Analysis
 
-### Free Tier Considerations
+### Free Tier Coverage (12 Months)
 
-- **ECS Fargate**: First 50k vCPU hours and 100GB storage per month free
-- **ALB**: First 750 hours per month free
-- **ElastiCache**: Not included in free tier (~$13/month for t3.micro)
-- **S3**: First 5GB storage, 20k GET, 2k PUT requests free
-- **CloudWatch**: 5GB logs, 10 custom metrics, 10 alarms free
+This deployment is **100% free** within AWS Free Tier limits:
+
+- **ECS Fargate**: 20 GB-month storage, 10 GB data transfer (Covered ✅)
+- **ALB**: 750 hours per month (Covered ✅)
+- **EFS**: 5 GB storage (Covered ✅)
+- **S3**: 5 GB storage, 20k GET, 2k PUT requests (Covered ✅)
+- **CloudWatch**: 5 GB logs, 10 custom metrics, 10 alarms (Covered ✅)
+- **VPC/Networking**: All included (Covered ✅)
+
+**Monthly Cost**: **$0.00** 🎉
+
+### After Free Tier (Month 13+)
+
+Estimated costs with default configuration:
+
+- **ECS Fargate**: ~$10-15/month (2 tasks × 256 CPU × 512 MB)
+- **ALB**: ~$16/month (750 hours + data processing)
+- **EFS**: ~$0.30/month (assuming 1 GB usage)
+- **S3**: ~$0.02/month (minimal usage)
+- **CloudWatch**: ~$0.50/month (logs + metrics)
+
+**Total**: ~$27-32/month (after free tier expires)
 
 ### Cost Reduction Strategies
 
 1. **Scale Down During Off-Hours**
 
    ```hcl
-   ecs_min_capacity = 0  # Scale to 0 at night (requires ALB warmup time)
+   ecs_min_capacity = 0  # Scale to 0 at night
    ```
 
-2. **Use EC2 Instead of Fargate** (Free tier eligible)
+2. **Reduce Task Count**
 
-   - Switch to EC2 launch type with t2.micro instances
-   - More setup but qualifies for 750 hours/month free
+   ```hcl
+   ecs_desired_count = 1  # Run single task
+   ```
 
-3. **Self-Hosted Redis**
-
-   - Run Redis in ECS alongside WBO (saves $13/month)
-   - Trade-off: Less managed, requires maintenance
-
-4. **Reduce Log Retention**
+3. **Reduce Log Retention**
    ```hcl
    retention_in_days = 1  # Minimum retention
    ```
@@ -239,34 +251,35 @@ Configure SNS notifications by uncommenting in `monitoring.tf`:
 
 ### Current Implementation
 
-- ✅ Private subnets for Redis
+- ✅ VPC isolation with public subnets
 - ✅ Security groups with least privilege
+- ✅ EFS encryption at rest enabled
 - ✅ S3 bucket encryption and versioning
 - ✅ IAM roles with minimal permissions
-- ✅ No public Redis access
+- ✅ No direct internet access to storage
 
 ### Recommended Enhancements
 
 1. **Enable HTTPS**
 
-   - Obtain SSL certificate via ACM
-   - Uncomment HTTPS listener in `alb.tf`
-   - Add certificate ARN to variables
+   - Obtain SSL certificate via ACM (free)
+   - Add HTTPS listener to ALB
+   - Redirect HTTP to HTTPS
 
-2. **Enable Redis Encryption**
-
-   ```hcl
-   at_rest_encryption_enabled = true
-   transit_encryption_enabled = true
-   ```
-
-3. **Add WAF Protection**
+2. **Add WAF Protection**
 
    - Create AWS WAF web ACL
    - Attach to ALB for DDoS protection
+   - Add rate limiting rules
 
-4. **VPC Flow Logs**
+3. **VPC Flow Logs**
+
    - Enable for network traffic analysis
+   - Monitor for suspicious patterns
+
+4. **Enable CloudTrail**
+   - Track all API calls
+   - Audit access to resources
 
 ## 🛠️ Maintenance
 
@@ -299,15 +312,26 @@ aws ecs update-service --cluster wbo-cluster --service wbo-service --desired-cou
 aws ecs update-service --cluster wbo-cluster --service wbo-service --desired-count 1 --region us-east-1
 ```
 
-## 🧪 Testing Redis Sync
+## 🧪 Testing Multi-Instance Sync
 
-To verify multi-instance synchronization:
+To verify EFS-based synchronization across containers:
 
 1. Open whiteboard: `http://<alb-url>/boards/test`
 2. Open same URL in another browser/incognito window
 3. Draw on one browser
-4. Verify real-time sync appears in other browser
-5. Check CloudWatch logs for Redis connection messages
+4. **Instantly see changes** appear in the other browser
+5. Check CloudWatch logs for board save/load messages
+6. Verify both browsers connect to different containers (ALB distributes load)
+
+### How EFS Sync Works
+
+```
+Browser 1 → Container 1 → Writes to /opt/app/server-data/boards/test.json (EFS)
+                                                ↓
+Browser 2 → Container 2 → Reads from /opt/app/server-data/boards/test.json (EFS)
+```
+
+All containers mount the **same EFS volume**, ensuring perfect synchronization!
 
 ## 📚 Terraform Outputs
 
@@ -321,8 +345,8 @@ Available outputs:
 
 - `alb_url`: Application access URL
 - `alb_dns_name`: Load balancer DNS
-- `redis_endpoint`: Redis connection endpoint
-- `s3_bucket_name`: Persistence bucket
+- `efs_file_system_id`: EFS file system ID
+- `s3_bucket_name`: Backup bucket name
 - `ecs_cluster_name`: ECS cluster name
 - `ecs_service_name`: ECS service name
 - `cloudwatch_log_group`: Log group name
@@ -340,7 +364,7 @@ Type `yes` to confirm. This will:
 
 - Delete ECS cluster and tasks
 - Remove ALB and target groups
-- Delete ElastiCache Redis cluster
+- Delete EFS file system and mount targets
 - Remove S3 bucket (if empty)
 - Delete all CloudWatch resources
 - Clean up VPC and networking

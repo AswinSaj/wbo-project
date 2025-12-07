@@ -1,0 +1,55 @@
+# ElastiCache Subnet Group
+resource "aws_elasticache_subnet_group" "redis_subnet_group" {
+  name       = "wbo-redis-subnet-group"
+  subnet_ids = [aws_subnet.private_subnet_1.id, aws_subnet.private_subnet_2.id]
+
+  tags = {
+    Name        = "wbo-redis-subnet-group"
+    Environment = var.environment
+  }
+}
+
+# Redis Parameter Group (for pub/sub optimization)
+resource "aws_elasticache_parameter_group" "redis_params" {
+  name   = "wbo-redis-params"
+  family = "redis7"
+
+  parameter {
+    name  = "timeout"
+    value = "300"
+  }
+
+  parameter {
+    name  = "tcp-keepalive"
+    value = "300"
+  }
+
+  tags = {
+    Name        = "wbo-redis-params"
+    Environment = var.environment
+  }
+}
+
+# Redis Replication Group (Free Tier: single cache.t2.micro or cache.t3.micro)
+resource "aws_elasticache_replication_group" "redis" {
+  replication_group_id       = "wbo-redis"
+  description                = "Redis cluster for WBO pub/sub synchronization"
+  engine                     = "redis"
+  engine_version             = "7.0"
+  node_type                  = var.redis_node_type # cache.t3.micro for free tier
+  num_cache_clusters         = 1                    # Free tier: single node
+  port                       = 6379
+  parameter_group_name       = aws_elasticache_parameter_group.redis_params.name
+  subnet_group_name          = aws_elasticache_subnet_group.redis_subnet_group.name
+  security_group_ids         = [aws_security_group.redis_sg.id]
+  automatic_failover_enabled = false # Single node - no failover
+  at_rest_encryption_enabled = false # Free tier limitation
+  transit_encryption_enabled = false # Free tier limitation
+  apply_immediately          = true
+  auto_minor_version_upgrade = true
+
+  tags = {
+    Name        = "wbo-redis"
+    Environment = var.environment
+  }
+}

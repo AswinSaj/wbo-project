@@ -1,0 +1,27 @@
+# Example terraform.tfvars file
+# Copy this to terraform.tfvars and customize for your deployment
+
+# AWS Configuration
+aws_region  = "us-east-1"
+environment = "dev"
+
+# Project Naming
+project_name = "wbo"
+
+# Redis Configuration (Free Tier)
+redis_node_type = "cache.t3.micro"  # or "cache.t2.micro" in some regions
+
+# ECS Task Configuration (Minimal Free Tier)
+ecs_task_cpu    = "256"  # 0.25 vCPU
+ecs_task_memory = "512"  # 512 MB
+
+# Auto-scaling Configuration
+ecs_desired_count = 2   # Start with 2 tasks for HA
+ecs_min_capacity  = 1   # Can scale down to 1
+ecs_max_capacity  = 10  # Scale up to 10 under load
+
+# Optional: Uncomment to enable HTTPS
+# ssl_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/your-cert-id"
+
+# Optional: Uncomment to enable SNS alarm notifications
+# alarm_email = "your-email@example.com"

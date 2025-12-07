@@ -1,0 +1,138 @@
+# Self-Hosted Redis in ECS (Free Tier Alternative)
+# Use this instead of ElastiCache to stay within free tier
+
+# Redis ECS Task Definition
+resource "aws_ecs_task_definition" "redis_task" {
+  family                   = "wbo-redis-task"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "redis"
+      image     = "redis:7-alpine"
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = 6379
+          protocol      = "tcp"
+        }
+      ]
+
+      command = [
+        "redis-server",
+        "--maxmemory", "256mb",
+        "--maxmemory-policy", "allkeys-lru",
+        "--save", "60", "1",
+        "--loglevel", "notice"
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.redis_logs.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "redis"
+        }
+      }
+
+      healthCheck = {
+        command     = ["CMD", "redis-cli", "ping"]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 30
+      }
+    }
+  ])
+
+  tags = {
+    Name        = "wbo-redis-task"
+    Environment = var.environment
+  }
+}
+
+# CloudWatch Log Group for Redis
+resource "aws_cloudwatch_log_group" "redis_logs" {
+  name              = "/ecs/wbo-redis"
+  retention_in_days = 7
+
+  tags = {
+    Name        = "wbo-redis-logs"
+    Environment = var.environment
+  }
+}
+
+# Redis ECS Service
+resource "aws_ecs_service" "redis_service" {
+  name            = "wbo-redis-service"
+  cluster         = aws_ecs_cluster.wbo_cluster.id
+  task_definition = aws_ecs_task_definition.redis_task.arn
+  desired_count   = 1 # Single instance for free tier
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = [aws_subnet.private_subnet_1.id]
+    security_groups  = [aws_security_group.redis_sg.id]
+    assign_public_ip = false
+  }
+
+  # Service discovery for internal DNS
+  service_registries {
+    registry_arn = aws_service_discovery_service.redis.arn
+  }
+
+  tags = {
+    Name        = "wbo-redis-service"
+    Environment = var.environment
+  }
+}
+
+# Service Discovery Namespace
+resource "aws_service_discovery_private_dns_namespace" "wbo" {
+  name        = "wbo.local"
+  description = "Private DNS namespace for WBO services"
+  vpc         = aws_vpc.wbo_vpc.id
+
+  tags = {
+    Name        = "wbo-service-discovery"
+    Environment = var.environment
+  }
+}
+
+# Service Discovery Service for Redis
+resource "aws_service_discovery_service" "redis" {
+  name = "redis"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.wbo.id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+
+  tags = {
+    Name        = "wbo-redis-discovery"
+    Environment = var.environment
+  }
+}
+
+# Update WBO task definition to use self-hosted Redis
+# Change REDIS_URL to: redis://redis.wbo.local:6379
+
+output "redis_dns_name" {
+  description = "Internal DNS name for Redis service"
+  value       = "redis.wbo.local"
+}

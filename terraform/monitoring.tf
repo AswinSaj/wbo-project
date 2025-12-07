@@ -6,15 +6,20 @@ resource "aws_cloudwatch_dashboard" "wbo_dashboard" {
     widgets = [
       {
         type = "metric"
+        x      = 0
+        y      = 0
+        width  = 12
+        height = 6
         properties = {
           metrics = [
-            ["AWS/ECS", "CPUUtilization", { stat = "Average", label = "CPU Utilization" }],
-            [".", "MemoryUtilization", { stat = "Average", label = "Memory Utilization" }]
+            ["AWS/ECS", "CPUUtilization", "ServiceName", aws_ecs_service.wbo_service.name, "ClusterName", aws_ecs_cluster.wbo_cluster.name, { stat = "Average", label = "CPU Avg" }],
+            ["...", { stat = "Maximum", label = "CPU Max" }]
           ]
-          period = 300
-          stat   = "Average"
-          region = var.aws_region
-          title  = "ECS Service CPU & Memory"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          title   = "ECS CPU Utilization (%)"
+          period  = 300
           yAxis = {
             left = {
               min = 0
@@ -25,46 +30,108 @@ resource "aws_cloudwatch_dashboard" "wbo_dashboard" {
       },
       {
         type = "metric"
+        x      = 12
+        y      = 0
+        width  = 12
+        height = 6
         properties = {
           metrics = [
-            ["AWS/ApplicationELB", "TargetResponseTime", { stat = "Average", label = "Response Time" }],
-            [".", "RequestCount", { stat = "Sum", label = "Request Count" }]
+            ["AWS/ECS", "MemoryUtilization", "ServiceName", aws_ecs_service.wbo_service.name, "ClusterName", aws_ecs_cluster.wbo_cluster.name, { stat = "Average", label = "Memory Avg" }],
+            ["...", { stat = "Maximum", label = "Memory Max" }]
           ]
-          period = 300
-          stat   = "Average"
-          region = var.aws_region
-          title  = "ALB Performance Metrics"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          title   = "ECS Memory Utilization (%)"
+          period  = 300
+          yAxis = {
+            left = {
+              min = 0
+              max = 100
+            }
+          }
         }
       },
       {
         type = "metric"
+        x      = 0
+        y      = 6
+        width  = 12
+        height = 6
         properties = {
           metrics = [
-            ["AWS/ApplicationELB", "HealthyHostCount", { stat = "Average", label = "Healthy Hosts" }],
-            [".", "UnHealthyHostCount", { stat = "Average", label = "Unhealthy Hosts" }]
+            ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", aws_lb.wbo_alb.arn_suffix, { stat = "Sum", label = "Total Requests" }]
           ]
-          period = 300
-          stat   = "Average"
-          region = var.aws_region
-          title  = "Target Health"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          title   = "ALB Request Count"
+          period  = 300
         }
       },
       {
         type = "metric"
+        x      = 12
+        y      = 6
+        width  = 12
+        height = 6
         properties = {
           metrics = [
-            ["AWS/ElastiCache", "CPUUtilization", { stat = "Average", label = "Redis CPU" }],
-            [".", "NetworkBytesIn", { stat = "Sum", label = "Network In" }],
-            [".", "NetworkBytesOut", { stat = "Sum", label = "Network Out" }]
+            ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", aws_lb.wbo_alb.arn_suffix, { stat = "Average", label = "Response Time" }]
           ]
-          period = 300
-          stat   = "Average"
-          region = var.aws_region
-          title  = "Redis Performance"
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          title   = "ALB Response Time (seconds)"
+          period  = 300
+        }
+      },
+      {
+        type = "metric"
+        x      = 0
+        y      = 12
+        width  = 12
+        height = 6
+        properties = {
+          metrics = [
+            ["AWS/ApplicationELB", "HealthyHostCount", "TargetGroup", aws_lb_target_group.wbo_tg.arn_suffix, "LoadBalancer", aws_lb.wbo_alb.arn_suffix, { stat = "Average", label = "Healthy", color = "#2ca02c" }],
+            [".", "UnHealthyHostCount", ".", ".", ".", ".", { stat = "Average", label = "Unhealthy", color = "#d62728" }]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          title   = "ALB Target Health"
+          period  = 60
+          yAxis = {
+            left = {
+              min = 0
+            }
+          }
+        }
+      },
+      {
+        type = "metric"
+        x      = 12
+        y      = 12
+        width  = 12
+        height = 6
+        properties = {
+          metrics = [
+            ["ECS/ContainerInsights", "RunningTaskCount", "ServiceName", aws_ecs_service.wbo_service.name, "ClusterName", aws_ecs_cluster.wbo_cluster.name, { stat = "Average", label = "Running Tasks" }]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.aws_region
+          title   = "ECS Running Task Count"
+          period  = 60
         }
       },
       {
         type = "log"
+        x      = 0
+        y      = 18
+        width  = 24
+        height = 6
         properties = {
           query   = "SOURCE '${aws_cloudwatch_log_group.wbo_logs.name}' | fields @timestamp, @message | sort @timestamp desc | limit 20"
           region  = var.aws_region
